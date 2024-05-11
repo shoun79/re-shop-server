@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const cookieParser = require('cookie-parser');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -54,6 +55,7 @@ async function run() {
 
         const usersCollection = client.db('reShopDB').collection('users');
         const productsCollection = client.db('reShopDB').collection('products');
+        const bookingsCollection = client.db('reShopDB').collection('bookings');
 
 
 
@@ -150,7 +152,7 @@ async function run() {
         })
 
 
-        //get host homes 
+        //get seller product 
         app.get('/products/:email', verifyJWT, async (req, res) => {
             const email = req.params.email;
             const decodedEmail = req.decoded.email;
@@ -162,18 +164,42 @@ async function run() {
             res.send(result)
         })
 
+        //get advertised product
+        app.get('/products-advertised', async (req, res) => {
+            const result = await productsCollection.find({
+                advertised: "true"
+            }).toArray();
+            res.send(result)
+        })
+
+        //get wishList product
+        app.get('/products-wishList', async (req, res) => {
+            const result = await productsCollection.find({
+                wishList: "true"
+            }).toArray();
+            res.send(result)
+        })
+
+        //get reported product
+        app.get('/products-report', async (req, res) => {
+            const result = await productsCollection.find({
+                report: "true"
+            }).toArray();
+            res.send(result)
+        })
+
 
 
 
         //add a product
-        app.post('/products', verifyJWT, async (req, res) => {
+        app.post('/products', async (req, res) => {
             const productData = req.body;
             const result = await productsCollection.insertOne(productData);
             res.send(result)
         });
 
-        //update a home
-        app.put('/product/:id', verifyJWT, async (req, res) => {
+        //update a product
+        app.put('/product/:id', async (req, res) => {
             const { id } = req.params;
             const productData = req.body;
             const filter = { _id: new ObjectId(id) };
@@ -186,11 +212,60 @@ async function run() {
         })
 
         //delete a product
-        app.delete('/product/:id', verifyJWT, async (req, res) => {
+        app.delete('/product/:id', async (req, res) => {
             const id = req.params.id;
             const result = await productsCollection.deleteOne({ _id: new ObjectId(id) });
             res.send(result)
         })
+
+        //********booking api********
+
+        // create payment intent
+
+        app.post('/create-payment-intent', async (req, res) => {
+            const { price } = req.body;
+            const priceToCent = price * 100;
+            const amount = parseInt(priceToCent);
+
+            const paymentIntent = await stripe.paymentIntents.create({
+                amount: amount,
+                currency: "usd",
+                payment_method_types: ['card']
+            })
+            res.send({
+                clientSecret: paymentIntent.client_secret
+            })
+        })
+
+        //get user bookings 
+        app.get('/bookings', verifyJWT, async (req, res) => {
+            let query = {};
+            const email = req.query.email;
+
+            if (email) {
+                query =
+                    { email }
+            }
+            const result = await bookingsCollection.find(query).toArray();
+            res.send(result)
+
+        })
+        //save bookings
+        app.post('/bookings', verifyJWT, async (req, res) => {
+            const booking = req.body;
+            const result = await bookingsCollection.insertOne(booking);
+
+            res.send(result)
+        })
+
+        //delete booking
+
+        app.delete('/bookings/:id', verifyJWT, async (req, res) => {
+            const id = req.params.id;
+            const result = await bookingsCollection.deleteOne({ _id: new ObjectId(id) });
+            res.send(result)
+        })
+
 
 
         console.log('Database Connected...')
