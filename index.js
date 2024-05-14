@@ -13,7 +13,7 @@ const port = process.env.PORT || 5000;
 
 //middlewares
 app.use(cors({
-    origin: ['http://localhost:5173'], //TODO:for development
+    origin: ['http://localhost:5173', 'https://re-shop-d76ef.web.app'],
     credentials: true
 }));
 app.use(express.json());
@@ -56,9 +56,20 @@ async function run() {
         const usersCollection = client.db('reShopDB').collection('users');
         const productsCollection = client.db('reShopDB').collection('products');
         const bookingsCollection = client.db('reShopDB').collection('bookings');
+        const wishlistCollection = client.db('reShopDB').collection('wishlist');
+        const reportCollection = client.db('reShopDB').collection('report');
 
 
+        //verify admin
+        const verifyAdmin = async (req, res, next) => {
+            const decodedEmail = req.decoded.email;
+            const user = await usersCollection.findOne({ email: decodedEmail })
+            if (user?.role !== 'admin') {
+                return res.status(403).send({ message: 'Forbidden access' })
 
+            }
+            next()
+        }
 
         // app.post('/logout', async (req, res) => {
         //     res.clearCookie('token', { maxAge: 0 }).send({ success: true })
@@ -82,7 +93,7 @@ async function run() {
         })
 
 
-        app.get('/users', verifyJWT, async (req, res) => {
+        app.get('/users', verifyJWT, verifyAdmin, async (req, res) => {
             const users = await usersCollection.find().toArray();
             res.send(users)
         })
@@ -104,7 +115,7 @@ async function run() {
 
 
         //get a seller verify status
-        app.get('/seller/:email', async (req, res) => {
+        app.get('/seller/:email', verifyJWT, async (req, res) => {
             const email = req.params.email;
 
             const query = { email: email };
@@ -113,7 +124,7 @@ async function run() {
         })
 
         //delete user 
-        app.delete('/user/:id', verifyJWT, async (req, res) => {
+        app.delete('/user/:id', verifyJWT, verifyAdmin, async (req, res) => {
             const id = req.params.id;
             const result = await usersCollection.deleteOne({ _id: new ObjectId(id) });
             res.send(result)
@@ -130,7 +141,7 @@ async function run() {
 
                 if (category && category !== 'all') {
                     // If category is specified and not 'all', filter products by category
-                    products = await productsCollection.find({ productCategory: category }).toArray();
+                    products = await productsCollection.find({ productCategory: category, status: "available" }).toArray();
                 }
                 else {
                     // If category is not specified or 'all', fetch all products
@@ -172,34 +183,149 @@ async function run() {
             res.send(result)
         })
 
-        //get wishList product
-        app.get('/products-wishList', async (req, res) => {
-            const result = await productsCollection.find({
-                wishList: "true"
-            }).toArray();
+
+
+        //===========wishList  related api===========
+
+
+        //get wishList single product product by email
+
+        app.get('/wishlist-status', verifyJWT, async (req, res) => {
+
+            try {
+                let query = {};
+                const email = req.query.email;
+                const id = req.query.id;
+
+                if (email, id) {
+                    query =
+                        { 'user.email': email, productId: id }
+                }
+
+
+                const wishlistItems = await wishlistCollection.find(query).toArray();
+
+                //res.send(wishlistItems);
+                res.send(wishlistItems.length ? "true" : "false");
+            } catch (error) {
+                console.error(error);
+                res.status(500).send('Server error');
+            }
+
+        })
+
+
+        //get wishList product by email
+        app.get('/wishlist/:email', verifyJWT, async (req, res) => {
+            try {
+                let query = {};
+                const { email } = req.params;
+                if (email) {
+                    query =
+                        { 'user.email': email }
+
+                }
+
+
+                const wishlistItems = await wishlistCollection.find(query).toArray();
+
+
+
+
+                res.send(wishlistItems);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send('Server error');
+            }
+
+        })
+
+        //post wishList product
+        app.post('/wishlist-add', verifyJWT, async (req, res) => {
+
+
+            try {
+                const wishListData = req.body;
+
+                const result = await wishlistCollection.insertOne(wishListData);
+                res.send(result);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send('Server error');
+            }
+
+        })
+
+        //delete wishList product 
+        app.delete('/wishlist/:id', verifyJWT, async (req, res) => {
+            try {
+                const { id } = req.params;
+                const result = await wishlistCollection.deleteOne({ _id: new ObjectId(id) });
+
+                res.send(result);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send('Server error');
+            }
+
+        });
+
+        //delete wishList product after booking
+        app.delete('/wishlist-booking/:id', verifyJWT, async (req, res) => {
+            try {
+                const { id } = req.params;
+
+                const wishlistDelete = await wishlistCollection.deleteOne({ productId: id });
+                res.send(wishlistDelete);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send('Server error');
+            }
+
+        })
+
+
+
+
+
+        //===========report  related api===========
+
+
+        //get reported product
+        app.get('/products-report', verifyJWT, verifyAdmin, async (req, res) => {
+            const result = await reportCollection.find().toArray();
             res.send(result)
         })
 
-        //get reported product
-        app.get('/products-report', async (req, res) => {
-            const result = await productsCollection.find({
-                report: "true"
-            }).toArray();
-            res.send(result)
+        //add reported product
+        app.post('/products-report', verifyJWT, async (req, res) => {
+            const reportData = req.body;
+            const result = await reportCollection.insertOne(reportData);
+            res.send(result);
         })
+
+        //delete reported products
+        app.delete('/products-report/:id', verifyJWT, verifyAdmin, async (req, res) => {
+            const { id } = req.params;
+
+            const result = await reportCollection.deleteMany({ productId: id });
+
+            res.send(result);
+        })
+
 
 
 
 
         //add a product
-        app.post('/products', async (req, res) => {
+        app.post('/products', verifyJWT, async (req, res) => {
             const productData = req.body;
             const result = await productsCollection.insertOne(productData);
             res.send(result)
         });
 
         //update a product
-        app.put('/product/:id', async (req, res) => {
+        app.put('/product/:id', verifyJWT, async (req, res) => {
             const { id } = req.params;
             const productData = req.body;
             const filter = { _id: new ObjectId(id) };
@@ -212,7 +338,7 @@ async function run() {
         })
 
         //delete a product
-        app.delete('/product/:id', async (req, res) => {
+        app.delete('/product/:id', verifyJWT, async (req, res) => {
             const id = req.params.id;
             const result = await productsCollection.deleteOne({ _id: new ObjectId(id) });
             res.send(result)
@@ -222,7 +348,7 @@ async function run() {
 
         // create payment intent
 
-        app.post('/create-payment-intent', async (req, res) => {
+        app.post('/create-payment-intent', verifyJWT, async (req, res) => {
             const { price } = req.body;
             const priceToCent = price * 100;
             const amount = parseInt(priceToCent);
